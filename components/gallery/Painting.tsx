@@ -16,9 +16,10 @@ type PaintingProps = {
   onSelect: () => void;
 };
 
-const currencyFormatter = new Intl.NumberFormat("id-ID", {
+const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "IDR",
+  currencyDisplay: "code",
   maximumFractionDigits: 0,
 });
 
@@ -119,9 +120,9 @@ export function Painting({
         >
           <aside
             className="painting-popover painting-popover--selected"
-            aria-label={`Informasi ${title}`}
+            aria-label={`About ${title}`}
           >
-            <p className="painting-popover__eyebrow">Koleksi galeri</p>
+            <p className="painting-popover__eyebrow">Gallery collection</p>
             <h2>{title}</h2>
             <p className="painting-popover__description">{description}</p>
             <strong>{currencyFormatter.format(price)}</strong>
@@ -134,8 +135,8 @@ export function Painting({
           distanceFactor={7.5}
           style={{ pointerEvents: "none" }}
         >
-          <aside className="painting-popover" aria-label={`Informasi ${title}`}>
-            <p className="painting-popover__eyebrow">Koleksi galeri</p>
+          <aside className="painting-popover" aria-label={`About ${title}`}>
+            <p className="painting-popover__eyebrow">Gallery collection</p>
             <h2>{title}</h2>
             <p className="painting-popover__description">{description}</p>
             <strong>{currencyFormatter.format(price)}</strong>

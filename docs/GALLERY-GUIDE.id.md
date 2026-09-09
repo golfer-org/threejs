@@ -2,11 +2,11 @@
 
 Panduan langkah demi langkah - Next.js, TypeScript, React Three Fiber, Drei, Three.js, dan GSAP
 
-Versi dokumentasi: 1.1
+Versi dokumentasi: 1.2
 
-Kondisi proyek: galeri skylight yang telah disetujui, 8 September 2026
+Kondisi proyek: galeri skylight multi-ruangan, 9 September 2026
 
-Perubahan 1.1: ruangan dibuat ulang sebagai geometri 3D berdasarkan referensi interior krem dengan skylight. Ditambahkan `GalleryRoom.tsx` dan `galleryLayout.ts`; pencahayaan siang hari, penempatan objek, kamera home, serta diagram diperbarui. Gambar referensi tidak dipasang sebagai background PNG dan tidak dikonversi menjadi GLB. Selection, popover, hitbox, form, dan tween GSAP tetap memakai alur yang sama.
+Perubahan 1.2: ditambahkan navigasi dua ruangan melalui portal pada lorong kanan. `GalleryCanvas` kini mengelola `roomId`, state machine transisi, overlay fade, dan penguncian input. `galleryRooms.ts` menjadi registry konfigurasi ruangan, `RoomPortal.tsx` menyediakan hitbox 3D dan tombol aksesibel, sedangkan `CameraController` mengabarkan saat kamera tiba sebelum scene ditukar. Antarmuka aplikasi juga telah menggunakan bahasa Inggris.
 
 ---
 
@@ -22,6 +22,7 @@ Dokumen ini membedah proyek `interactive-gallery` yang sedang berjalan, bukan co
 - cara mengelola selection, hover, pointer event, dan HTML overlay;
 - cara menganimasikan kamera dengan GSAP;
 - cara memuat model GLB dan menambahkan invisible hitbox;
+- cara membangun navigasi multi-room tanpa membuat Canvas baru;
 - penyebab z-fighting, posisi hitbox meleset, dan masalah UI 3D umum lainnya;
 - arah pengembangan yang aman untuk tahap berikutnya.
 
@@ -80,6 +81,8 @@ interactive-gallery/
 │   ├── GalleryScene.tsx         # light, data objek, komposisi scene
 │   ├── GalleryRoom.tsx          # dinding, skylight, balok, ceruk, ventilasi
 │   ├── galleryLayout.ts         # ukuran ruangan dan kamera home bersama
+│   ├── galleryRooms.ts          # registry, tema, dan tujuan antar-ruangan
+│   ├── RoomPortal.tsx           # portal, hitbox lorong, dan tombol aksesibel
 │   ├── Painting.tsx             # lukisan reusable dan popover
 │   ├── CameraController.tsx     # animasi kamera GSAP
 │   └── VendingMachine.tsx       # GLB, hover, hitbox, dan form
@@ -121,6 +124,7 @@ flowchart TD
   Scene --> Lights
   Scene --> Paintings
   Scene --> Vending
+  Scene --> Portal[RoomPortal]
   Scene --> CameraController
   Paintings --> Frame
   Paintings --> TexturePlane
@@ -128,6 +132,8 @@ flowchart TD
   Vending --> GLBClone
   Vending --> KeypadHitbox
   Vending --> FormHtml
+  Portal --> PortalHitbox[Passage hitbox]
+  Portal --> PortalHtml[Accessible HTML button]
 ```
 
 Transform parent memengaruhi child. Jika sebuah `<group>` diputar, posisi lokal mesh dan hitbox di dalamnya ikut berputar. Konsep ini penting ketika mengatur lukisan di dinding samping dan hitbox keypad.
@@ -166,23 +172,30 @@ rotation={[0, Math.PI / 2, 0]}
 ```mermaid
 flowchart TD
   Page[app/page.tsx] --> Canvas[GalleryCanvas]
-  Canvas --> State[selectedTarget + vendingPanelOpen]
+  Canvas --> State[selectedTarget + vendingPanelOpen + roomId]
+  Canvas --> Transition[transition phase + input lock]
   Canvas --> Scene[GalleryScene]
+  Registry[galleryRooms.ts] --> Canvas
+  Registry --> Scene
   Layout[galleryLayout.ts] --> Canvas
   Layout --> Room[GalleryRoom]
   Layout --> Camera[CameraController]
   Scene --> Room
   Scene --> Painting[3 x Painting]
   Scene --> Vending[VendingMachine]
+  Scene --> Portal[RoomPortal]
   Scene --> Camera[CameraController]
   Painting -->|onSelect| State
   Vending -->|onSelect / onKeypadClick| State
   State -->|selectedTarget| Camera
   Camera -->|GSAP tween| PerspectiveCamera
+  Portal -->|enter room| State
+  Camera -->|onArrive| Transition
+  Transition -->|swap room while covered| Scene
   Back[Back button] -->|reset state| State
 ```
 
-Satu sumber kebenaran selection berada di `GalleryCanvas`. Painting dan vending machine tidak menentukan kamera secara langsung; keduanya hanya mengirim target yang dipilih. `CameraController` bereaksi terhadap perubahan target tersebut.
+Satu sumber kebenaran selection dan ruangan aktif berada di `GalleryCanvas`. Painting, vending machine, dan portal tidak menentukan kamera secara langsung; semuanya hanya mengirim intent atau target. `CameraController` bereaksi terhadap target, lalu callback kedatangan menggerakkan state machine perpindahan ruangan.
 
 ## 8. Langkah 1 - App Router shell
 
@@ -192,19 +205,19 @@ File ini membuat root HTML, memuat CSS global, dan mendefinisikan metadata.
 
 ```tsx
 export const metadata: Metadata = {
-  title: "Ruang Imaji | Galeri 3D",
-  description: "Pengalaman galeri lukisan 3D interaktif.",
+  title: "Imagination Gallery | 3D Art Gallery",
+  description: "Explore an interactive 3D art gallery.",
 };
 ```
 
-`<html lang="id">` membantu browser dan pembaca layar mengenali bahasa utama. `children` adalah halaman aktif yang disisipkan Next.js.
+`<html lang="en">` membantu browser dan pembaca layar mengenali bahasa antarmuka saat ini. `children` adalah halaman aktif yang disisipkan Next.js.
 
 ### `app/page.tsx`
 
 ```tsx
 export default function Home() {
   return (
-    <main className="gallery-page" aria-label="Galeri seni virtual">
+    <main className="gallery-page" aria-label="Virtual art gallery">
       <GalleryCanvas />
     </main>
   );
@@ -256,6 +269,8 @@ State pusatnya:
 const [selectedTarget, setSelectedTarget] =
   useState<GalleryFocusTarget | null>(null);
 const [vendingPanelOpen, setVendingPanelOpen] = useState(false);
+const [roomId, setRoomId] = useState<GalleryRoomId>("main");
+const [transition, setTransition] = useState<RoomTransition>("idle");
 ```
 
 `null` berarti camera berada pada tampilan galeri. Sebuah target mempunyai kontrak:
@@ -271,7 +286,7 @@ type GalleryFocusTarget = {
 
 `position` adalah titik yang dipandang camera. `cameraTarget` adalah tujuan posisi camera, bukan arah pandang. Nama ini dapat diperjelas menjadi `cameraPosition` pada refactor mendatang.
 
-Tombol Back muncul secara kondisional ketika ada selection. `handleBack()` mereset selection dan panel vending secara bersamaan, sehingga CameraController otomatis kembali ke home.
+Tombol Back muncul secara kondisional ketika ada selection. `handleBack()` mereset selection dan panel vending secara bersamaan, sehingga CameraController otomatis kembali ke home. `roomId` memilih konfigurasi ruangan aktif. `transition` bernilai `idle`, `approaching`, `covering`, atau `revealing`; detailnya dibahas pada langkah multi-room.
 
 ## 11. Langkah 4 - Membuat ruangan galeri
 
@@ -659,9 +674,95 @@ flowchart TD
   PaintingFocus -->|Back| Idle
   VendingFocus -->|Back| Idle
   Form -->|Back| Idle
+  Idle -->|click passage| Approach[Camera approaches passage]
+  Approach -->|arrive + fade| RoomSwap[Swap active room]
+  RoomSwap -->|reveal| Idle
 ```
 
-## 21. Penjelasan per file
+## 21. Langkah 13 - Multi-room dan portal
+
+Versi 1.2 memakai satu `<Canvas>` dan menukar konfigurasi scene di dalamnya. Pendekatan ini menjaga renderer, event system, dan context R3F tetap hidup. Ruang I berisi koleksi utama serta vending machine. Ruang II memakai palet hijau lembut, intensitas matahari berbeda, dan susunan ulang tiga texture yang sama.
+
+### Registry ruangan
+
+`galleryRooms.ts` memisahkan identitas dan tema ruangan dari komponen renderer:
+
+```tsx
+export type GalleryRoomId = "main" | "studio";
+
+export const GALLERY_ROOMS = {
+  main: {
+    title: "Room I · Imagination Gallery",
+    nextRoom: "studio",
+    skyColor: "#d5e7f2",
+    sunlight: 3.2,
+    hasVending: true,
+  },
+  studio: {
+    title: "Room II · Quiet Gallery",
+    nextRoom: "main",
+    wallColor: "#b9c9c0",
+    sunlight: 2.2,
+    hasVending: false,
+  },
+} satisfies Record<GalleryRoomId, RoomDefinition>;
+```
+
+`satisfies` memeriksa bentuk setiap konfigurasi tanpa menghilangkan tipe literal. `nextRoom` hanya boleh menunjuk `GalleryRoomId` yang valid, sehingga typo tujuan ditemukan TypeScript sebelum browser dijalankan.
+
+### Portal sebagai objek interaktif
+
+`RoomPortal.tsx` menempatkan `boxGeometry` tipis pada bukaan dinding kanan. Material transparan tetap dapat terkena raycast. Saat hover, opacity kecil dan `Edges` membuat batas portal terlihat. Portal juga mempunyai tombol Drei `<Html>` agar pengguna keyboard dapat memakai Tab dan Enter.
+
+```tsx
+<mesh
+  position={[4.87, 1.75, -7]}
+  rotation={[0, -Math.PI / 2, 0]}
+  onClick={() => onEnter()}
+  onPointerEnter={() => setHovered(true)}
+>
+  <boxGeometry args={[1.8, 3.4, 0.025]} />
+  <meshBasicMaterial transparent opacity={hovered ? 0.16 : 0.025} />
+  {hovered && <Edges color="#d8b77a" />}
+</mesh>
+```
+
+Hitbox sengaja mengikuti bidang lorong, bukan seluruh dinding. `disabled` mematikan handler selama transisi supaya satu klik tidak memulai lebih dari satu perpindahan.
+
+### State machine transisi
+
+Perpindahan tidak memakai timer tebakan. Callback `onArrive` dari timeline kamera menjadi sinyal bahwa pendekatan selesai:
+
+```mermaid
+flowchart LR
+  Idle[Active room] -->|click passage| Approach[approaching]
+  Approach -->|camera onArrive| Cover[covering]
+  Cover -->|overlay opaque| Swap[change roomId]
+  Swap -->|camera reset| Reveal[revealing]
+  Reveal -->|fade complete| Idle
+```
+
+Urutan tanggung jawabnya:
+
+1. `handleEnterRoom()` menyetel target kamera ke `PASSAGE_TARGET` dan fase `approaching`.
+2. `CameraController` melakukan tween 1,2 detik dan memanggil `onArrive`.
+3. `GalleryCanvas` melakukan fade hitam 0,4 detik pada fase `covering`.
+4. Setelah overlay penuh, `roomId` diganti, selection serta panel direset, dan fase menjadi `revealing`.
+5. `CameraController` memakai `useLayoutEffect` untuk mengembalikan kamera ke `HOME_POSITION` sebelum overlay dibuka selama 0,4 detik.
+
+Scene diberi `key={roomId}`. Ketika ID berubah, React memasang ulang subtree ruangan sehingga state hover dan form lokal tidak bocor ke ruangan berikutnya. `transitionLock` berbasis ref menutup celah sebelum pembaruan state React selesai, sedangkan atribut `inert` pada viewport menonaktifkan input DOM selama transisi. `isolation: isolate` menjaga overlay transisi tetap berada di atas HTML dari Drei.
+
+Implementasi ini adalah pergantian scene, bukan dua bangunan fisik yang dirender bersamaan. Belum ada gerak bebas, collision, persistence setelah reload, maupun kamera home berbeda per ruangan. Batasan ini membuat tahap awal ringan dan mudah diuji.
+
+### Menambah ruangan ketiga
+
+1. Tambahkan ID baru ke `GalleryRoomId` dan objeknya ke `GALLERY_ROOMS`.
+2. Pastikan `nextRoom` membentuk jalur yang valid.
+3. Tambahkan pilihan data lukisan untuk ID itu di `GalleryScene.tsx`.
+4. Jika geometri atau kamera home berbeda, pindahkan pilihan tersebut ke konfigurasi ruangan.
+5. Uji klik cepat berulang, Back, portal bolak-balik, fokus lukisan, keyboard, dan mobile.
+
+## 22. Penjelasan per file
 
 ### `app/page.tsx`
 
@@ -686,8 +787,21 @@ flowchart TD
 
 - Client boundary utama.
 - Membuat WebGL Canvas dan camera awal.
-- Menjadi owner state selection dan vending panel.
-- Menampilkan tombol Back serta atribusi model di luar canvas.
+- Menjadi owner selection, vending panel, `roomId`, dan fase transisi.
+- Mengurutkan approach, fade, room swap, reset, dan reveal.
+- Menampilkan tombol Back, label ruangan, overlay, serta atribusi model.
+
+### `galleryRooms.ts`
+
+- Mendefinisikan `GalleryRoomId`, konfigurasi kedua ruangan, dan `PASSAGE_TARGET`.
+- Menyimpan judul, subtitle, tujuan, warna, intensitas cahaya, dan ketersediaan vending.
+- Menjadikan penambahan ruangan data-driven dan type-safe.
+
+### `RoomPortal.tsx`
+
+- Menambahkan hitbox transparan pada lorong kanan.
+- Menampilkan outline ketika hover dan tombol HTML yang aksesibel.
+- Mengirim intent perpindahan tanpa mengganti room state sendiri.
 
 ### `galleryLayout.ts`
 
@@ -704,7 +818,7 @@ flowchart TD
 
 ### `GalleryScene.tsx`
 
-- Menyimpan data painting, vending target, dan lighting; memanggil `GalleryRoom` untuk bangunan.
+- Memilih data painting, vending target, tema, dan lighting berdasarkan ruangan aktif.
 - Menyusun semua object 3D.
 - Meneruskan callback, bukan menyimpan selection sendiri.
 - Menjadi composition root dunia 3D.
@@ -722,6 +836,7 @@ flowchart TD
 - Tidak merender geometry (`return null`).
 - Mendengarkan perubahan `selectedTarget`.
 - Menganimasikan posisi camera dan look-at vector.
+- Memanggil `onArrive` dan mereset kamera saat `roomId` berubah.
 - Membersihkan timeline lama.
 
 ### `VendingMachine.tsx`
@@ -732,7 +847,7 @@ flowchart TD
 - Menambahkan invisible hitbox tanpa memodifikasi GLB.
 - Menampilkan form DOM yang terikat ke titik 3D.
 
-## 22. Masalah umum dan diagnosis
+## 23. Masalah umum dan diagnosis
 
 ### Texture hitam atau tidak tampil
 
@@ -774,7 +889,15 @@ Penyebab utama adalah z-fighting. Jauhkan texture plane sedikit dari backing ata
 - Hentikan proses lama dan jalankan ulang `yarn dev`.
 - Periksa error kompilasi pertama di terminal, bukan hanya pesan reconnect browser.
 
-## 23. Performa dan kualitas produksi
+### Transisi ruangan macet atau berjalan dua kali
+
+- Pastikan callback `onArrive` hanya dipanggil oleh timeline aktif.
+- Kill timeline GSAP pada cleanup.
+- Jangan menghapus `transitionLock`; state React saja masih menyisakan celah klik pada frame yang sama.
+- Pastikan overlay menyelesaikan fase `covering` dan `revealing` melalui callback completion.
+- Periksa bahwa `nextRoom` menunjuk ID yang ada di `GALLERY_ROOMS`.
+
+## 24. Performa dan kualitas produksi
 
 Yang sudah diterapkan:
 
@@ -782,6 +905,8 @@ Yang sudah diterapkan:
 - batas DPR untuk mengendalikan biaya pixel;
 - preload texture dan GLB;
 - cleanup GSAP timeline;
+- satu Canvas untuk seluruh ruangan dan scene lama dilepas saat room swap;
+- input lock serta viewport inert selama transisi;
 - komponen dan data terpisah;
 - reduced motion pada animasi CSS overlay;
 - type-safe tuple dan target contract.
@@ -797,7 +922,7 @@ Peningkatan berikutnya:
 - sediakan fallback bila WebGL tidak tersedia;
 - audit lisensi seluruh asset.
 
-## 24. Cara menambah lukisan baru
+## 25. Cara menambah lukisan baru
 
 1. Simpan image di `public/paintings`.
 2. Tambahkan item ke array `paintings`.
@@ -822,7 +947,7 @@ Contoh:
 }
 ```
 
-## 25. Cara membuat tombol vending individual
+## 26. Cara membuat tombol vending individual
 
 Untuk input langsung dari keypad, ubah satu hitbox besar menjadi grid hitbox kecil:
 
@@ -844,7 +969,7 @@ Untuk presisi lebih tinggi:
 4. akses node hasil `useGLTF` berdasarkan nama;
 5. pasang handler atau hitbox pada node terkait.
 
-## 26. Latihan belajar
+## 27. Latihan belajar
 
 1. Tambahkan kaca skylight tanpa menutup sudut pandang camera; uji transparansi dan bayangan.
 2. Tambahkan satu sculpture GLB di tengah ruangan.
@@ -854,8 +979,9 @@ Untuk presisi lebih tinggi:
 6. Buat camera path dua tahap: mendekat lalu framing.
 7. Tambahkan loading screen dengan `useProgress` dari Drei.
 8. Pindahkan metadata lukisan ke file JSON.
+9. Tambahkan Ruang III dengan tema, koleksi, dan arah portal sendiri.
 
-## 27. Glosarium ringkas
+## 28. Glosarium ringkas
 
 | Istilah | Arti |
 |---|---|
@@ -876,8 +1002,10 @@ Untuk presisi lebih tinggi:
 | World space | Koordinat final terhadap root scene |
 | Tween | Interpolasi nilai dari awal ke tujuan selama durasi tertentu |
 | Invalidate | Meminta R3F merender frame baru pada demand mode |
+| State machine | Model fase eksplisit dan transisi yang diizinkan |
+| Inert | Status DOM yang menonaktifkan focus dan interaksi subtree |
 
-## 28. Ringkasan mental model
+## 29. Ringkasan mental model
 
 Jika Anda memahami alur berikut, Anda sudah memegang fondasi utama proyek ini. Tahap berikutnya bukan sekadar menambah fitur, tetapi memperkuat data model, accessibility, asset pipeline, dan pengujian interaksi.
 
@@ -893,6 +1021,10 @@ Pointer diraycast ke mesh dan hitbox.
 Selection disimpan di GalleryCanvas.
         ↓
 CameraController tween camera dengan GSAP.
+        ↓
+Portal arrival memicu fade dan pergantian roomId.
+        ↓
+Scene ruangan baru dipasang dan camera direset.
         ↓
 Drei Html menempelkan UI DOM ke titik 3D.
 ```

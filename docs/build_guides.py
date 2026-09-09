@@ -92,7 +92,7 @@ class GuideDoc(BaseDocTemplate):
             canvas.drawRightString(A4[0]-20*mm, A4[1]-14*mm, self.label)
             canvas.line(20*mm, A4[1]-17*mm, A4[0]-20*mm, A4[1]-17*mm)
         canvas.line(20*mm, 14*mm, A4[0]-20*mm, 14*mm)
-        canvas.drawString(20*mm, 9*mm, f'Documentation {self.version} / 08.09.2026')
+        canvas.drawString(20*mm, 9*mm, f'Documentation {self.version} / 09.09.2026')
         canvas.drawRightString(A4[0]-20*mm, 9*mm, str(doc.page))
         canvas.restoreState()
 
@@ -217,7 +217,7 @@ def parse(path, sty, lang):
                 result.append(block_table([[content]]))
         elif line.startswith('## '):
             flush()
-            if line.startswith('## 28.'):
+            if line.startswith('## 29.'):
                 result.append(PageBreak())
             result.append(Paragraph(inline(line[3:]), sty['h1']))
         elif line.startswith('### '):
@@ -277,7 +277,7 @@ def build(lang):
 def qa(paths):
     import pymupdf
     from PIL import Image, ImageDraw
-    target = ROOT/'tmp/pdfs/v1.1-review'
+    target = ROOT/'tmp/pdfs/v1.2-review'
     target.mkdir(parents=True, exist_ok=True)
     for path in paths:
         doc = pymupdf.open(path)

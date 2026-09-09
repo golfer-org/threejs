@@ -4,6 +4,8 @@ import { Painting } from "./Painting";
 import { CameraController } from "./CameraController";
 import { VendingMachine } from "./VendingMachine";
 import { GalleryRoom } from "./GalleryRoom";
+import { RoomPortal } from "./RoomPortal";
+import { GALLERY_ROOMS, type GalleryRoomId } from "./galleryRooms";
 
 type Vector3Tuple = readonly [number, number, number];
 
@@ -26,8 +28,8 @@ const paintings: readonly GalleryPainting[] = [
   {
     id: "dawn-lake",
     src: "/paintings/painting-1.jpg",
-    title: "Danau Fajar",
-    description: "Cahaya pertama yang jatuh perlahan di antara kabut dan pegunungan.",
+    title: "Dawn Lake",
+    description: "The first light of dawn settles gently between mist and mountains.",
     price: 18_500_000,
     position: [-4.86, 2.45, -2.2],
     rotation: [0, Math.PI / 2, 0],
@@ -38,7 +40,7 @@ const paintings: readonly GalleryPainting[] = [
     id: "champions-1999",
     src: "/paintings/painting-2.jpg?v=champions-1999",
     title: "Champions of Europe 1999",
-    description: "Perayaan malam bersejarah saat kejayaan Eropa kembali ke Manchester.",
+    description: "A celebration of the historic night European glory returned to Manchester.",
     price: 32_000_000,
     position: [0, 2.45, -7.86],
     rotation: [0, 0, 0],
@@ -48,8 +50,8 @@ const paintings: readonly GalleryPainting[] = [
   {
     id: "crescent-city",
     src: "/paintings/painting-3.jpg",
-    title: "Kota Bulan Sabit",
-    description: "Arsitektur imajiner yang tumbuh di antara laut, senja, dan bulan muda.",
+    title: "Crescent City",
+    description: "Imagined architecture rising between the sea, twilight, and a crescent moon.",
     price: 21_000_000,
     position: [4.86, 2.45, -2.2],
     rotation: [0, -Math.PI / 2, 0],
@@ -57,6 +59,18 @@ const paintings: readonly GalleryPainting[] = [
     cameraTarget: [1.86, 2.45, -2.2],
   },
 ];
+
+// The second room reuses the available art assets in different wall positions.
+const studioPaintings: readonly GalleryPainting[] = paintings.map((slot, index) => {
+  const artwork = paintings[(index + 1) % paintings.length];
+  return {
+    ...artwork,
+    id: `studio-${artwork.id}`,
+    position: slot.position,
+    rotation: slot.rotation,
+    cameraTarget: slot.cameraTarget,
+  };
+});
 
 const vendingMachine: GalleryFocusTarget = {
   id: "soda-vending-machine",
@@ -118,6 +132,10 @@ function GallerySpotlight({ position, target }: GallerySpotlightProps) {
 }
 
 type GallerySceneProps = {
+  roomId: GalleryRoomId;
+  transitioning: boolean;
+  onEnterRoom: () => void;
+  onCameraArrive: () => void;
   selectedTarget: GalleryFocusTarget | null;
   onSelectTarget: (target: GalleryFocusTarget) => void;
   onOpenVendingPanel: () => void;
@@ -126,22 +144,28 @@ type GallerySceneProps = {
 };
 
 export function GalleryScene({
+  roomId,
+  transitioning,
+  onEnterRoom,
+  onCameraArrive,
   selectedTarget,
   onSelectTarget,
   onOpenVendingPanel,
   vendingPanelOpen,
   onCloseVendingPanel,
 }: GallerySceneProps) {
+  const room = GALLERY_ROOMS[roomId];
+  const roomPaintings = roomId === "main" ? paintings : studioPaintings;
   return (
     <>
-      <color attach="background" args={["#d5e7f2"]} />
+      <color attach="background" args={[room.skyColor]} />
 
       <ambientLight color="#fff5e7" intensity={0.65} />
       <hemisphereLight args={["#edf5ff", "#c8b797", 1.6]} />
       <directionalLight
         castShadow
         color="#fff0d4"
-        intensity={3.2}
+        intensity={room.sunlight}
         position={[5, 12, 4]}
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-12}
@@ -153,7 +177,7 @@ export function GalleryScene({
         shadow-bias={-0.0001}
         shadow-normalBias={0.025}
       />
-      {spotlights.map((light, index) => (
+      {spotlights.filter((_, index) => room.hasVending || index !== 0).map((light, index) => (
         <GallerySpotlight
           key={index}
           position={light.position}
@@ -161,9 +185,15 @@ export function GalleryScene({
         />
       ))}
 
-      <GalleryRoom />
+      <GalleryRoom wallColor={room.wallColor} floorColor={room.floorColor} />
 
-      {paintings.map((painting) => (
+      <RoomPortal
+        destination={GALLERY_ROOMS[room.nextRoom].title}
+        disabled={transitioning}
+        onEnter={onEnterRoom}
+      />
+
+      {roomPaintings.map((painting) => (
         <Painting
           key={painting.id}
           {...painting}
@@ -172,7 +202,7 @@ export function GalleryScene({
         />
       ))}
 
-      <VendingMachine
+      {room.hasVending && <VendingMachine
         position={vendingMachine.position}
         selected={selectedTarget?.id === vendingMachine.id}
         panelOpen={vendingPanelOpen}
@@ -182,9 +212,9 @@ export function GalleryScene({
           onSelectTarget(vendingMachine);
           onOpenVendingPanel();
         }}
-      />
+      />}
 
-      <CameraController selectedTarget={selectedTarget} />
+      <CameraController roomId={roomId} selectedTarget={selectedTarget} onArrive={onCameraArrive} />
     </>
   );
 }

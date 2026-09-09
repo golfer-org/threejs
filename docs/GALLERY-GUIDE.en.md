@@ -2,11 +2,11 @@
 
 A step-by-step guide - Next.js, TypeScript, React Three Fiber, Drei, Three.js, and GSAP
 
-Documentation version: 1.1
+Documentation version: 1.2
 
-Project snapshot: approved skylight gallery, September 8, 2026
+Project snapshot: multi-room skylight gallery, September 9, 2026
 
-Changes in 1.1: the room was rebuilt as 3D geometry inspired by the cream interior and skylight reference. Added `GalleryRoom.tsx` and `galleryLayout.ts`; updated daylight, object placement, the home camera, and diagrams. The reference image is not used as a PNG backdrop or converted into a GLB. Selection, popovers, the hitbox, form, and GSAP tween retain the same interaction flow.
+Changes in 1.2: two-room navigation was added through the right-hand passage. `GalleryCanvas` now owns `roomId`, a transition state machine, a fade overlay, and an input lock. `galleryRooms.ts` is the room configuration registry, `RoomPortal.tsx` supplies a 3D hitbox and accessible button, and `CameraController` reports arrival before the scene is swapped. The application interface is now fully in English.
 
 ---
 
@@ -22,6 +22,7 @@ This document explains the actual `interactive-gallery` project rather than an i
 - how selection, hover, pointer events, and HTML overlays work;
 - how to animate a camera with GSAP;
 - how to load a GLB model and add an invisible hitbox;
+- how to implement multi-room navigation without creating another Canvas;
 - why z-fighting, misplaced hitboxes, and common 3D UI issues occur;
 - how to extend the project safely.
 
@@ -80,6 +81,8 @@ interactive-gallery/
 │   ├── GalleryScene.tsx         # lights, object data, scene composition
 │   ├── GalleryRoom.tsx          # walls, skylight, beams, alcove, grille
 │   ├── galleryLayout.ts         # shared room dimensions and camera home
+│   ├── galleryRooms.ts          # room registry, themes, destinations
+│   ├── RoomPortal.tsx           # passage hitbox and accessible button
 │   ├── Painting.tsx             # reusable painting and popovers
 │   ├── CameraController.tsx     # GSAP camera animation
 │   └── VendingMachine.tsx       # GLB, hover, hitbox, and form
@@ -121,6 +124,7 @@ flowchart TD
   Scene --> Lights
   Scene --> Paintings
   Scene --> Vending
+  Scene --> Portal[RoomPortal]
   Scene --> CameraController
   Paintings --> Frame
   Paintings --> TexturePlane
@@ -128,6 +132,8 @@ flowchart TD
   Vending --> GLBClone
   Vending --> KeypadHitbox
   Vending --> FormHtml
+  Portal --> PortalHitbox[Passage hitbox]
+  Portal --> PortalHtml[Accessible HTML button]
 ```
 
 A parent transform affects all children. If a `<group>` rotates, the local positions of its meshes and hitboxes rotate with it. This is crucial when placing paintings on side walls and calibrating the keypad hitbox.
@@ -166,23 +172,30 @@ rotation={[0, Math.PI / 2, 0]}
 ```mermaid
 flowchart TD
   Page[app/page.tsx] --> Canvas[GalleryCanvas]
-  Canvas --> State[selectedTarget + vendingPanelOpen]
+  Canvas --> State[selectedTarget + vendingPanelOpen + roomId]
+  Canvas --> Transition[transition phase + input lock]
   Canvas --> Scene[GalleryScene]
+  Registry[galleryRooms.ts] --> Canvas
+  Registry --> Scene
   Layout[galleryLayout.ts] --> Canvas
   Layout --> Room[GalleryRoom]
   Layout --> Camera[CameraController]
   Scene --> Room
   Scene --> Painting[3 x Painting]
   Scene --> Vending[VendingMachine]
+  Scene --> Portal[RoomPortal]
   Scene --> Camera[CameraController]
   Painting -->|onSelect| State
   Vending -->|onSelect / onKeypadClick| State
   State -->|selectedTarget| Camera
   Camera -->|GSAP tween| PerspectiveCamera
+  Portal -->|enter room| State
+  Camera -->|onArrive| Transition
+  Transition -->|swap room while covered| Scene
   Back[Back button] -->|reset state| State
 ```
 
-Selection has one source of truth in `GalleryCanvas`. Paintings and the vending machine do not move the camera directly. They only report the selected target, and `CameraController` reacts to that state change.
+Selection and the active room have one source of truth in `GalleryCanvas`. Paintings, the vending machine, and the portal never move the camera directly; they only report intent or a target. `CameraController` reacts to the target, then its arrival callback advances the room-transition state machine.
 
 ## 8. Step 1 - App Router shell
 
@@ -192,19 +205,19 @@ This file creates the root HTML document, imports global CSS, and defines metada
 
 ```tsx
 export const metadata: Metadata = {
-  title: "Ruang Imaji | Galeri 3D",
-  description: "Pengalaman galeri lukisan 3D interaktif.",
+  title: "Imagination Gallery | 3D Art Gallery",
+  description: "Explore an interactive 3D art gallery.",
 };
 ```
 
-`<html lang="id">` tells browsers and screen readers the primary interface language. `children` is the active route inserted by Next.js.
+`<html lang="en">` tells browsers and screen readers the current interface language. `children` is the active route inserted by Next.js.
 
 ### `app/page.tsx`
 
 ```tsx
 export default function Home() {
   return (
-    <main className="gallery-page" aria-label="Galeri seni virtual">
+    <main className="gallery-page" aria-label="Virtual art gallery">
       <GalleryCanvas />
     </main>
   );
@@ -256,6 +269,8 @@ The central state is:
 const [selectedTarget, setSelectedTarget] =
   useState<GalleryFocusTarget | null>(null);
 const [vendingPanelOpen, setVendingPanelOpen] = useState(false);
+const [roomId, setRoomId] = useState<GalleryRoomId>("main");
+const [transition, setTransition] = useState<RoomTransition>("idle");
 ```
 
 `null` means the camera is in gallery overview. A target follows this contract:
@@ -271,7 +286,7 @@ type GalleryFocusTarget = {
 
 `position` is the point the camera looks at. `cameraTarget` is the destination of the camera itself, not its look direction. A future refactor could rename it to `cameraPosition` for clarity.
 
-The Back button is conditionally rendered whenever a selection exists. `handleBack()` resets both selection and the vending panel, so CameraController automatically returns home.
+The Back button is conditionally rendered whenever a selection exists. `handleBack()` resets both selection and the vending panel, so CameraController automatically returns home. `roomId` selects the active room configuration. `transition` is `idle`, `approaching`, `covering`, or `revealing`; the multi-room step explains those phases.
 
 ## 11. Step 4 - Constructing the room
 
@@ -659,9 +674,95 @@ flowchart TD
   PaintingFocus -->|Back| Idle
   VendingFocus -->|Back| Idle
   Form -->|Back| Idle
+  Idle -->|click passage| Approach[Camera approaches passage]
+  Approach -->|arrive + fade| RoomSwap[Swap active room]
+  RoomSwap -->|reveal| Idle
 ```
 
-## 21. File-by-file reference
+## 21. Step 13 - Multi-room navigation and portals
+
+Version 1.2 keeps one `<Canvas>` alive and swaps the scene configuration inside it. This preserves the renderer, R3F context, and event system. Room I contains the main collection and vending machine. Room II uses a soft sage palette, different sunlight intensity, and a rearrangement of the same three artwork textures.
+
+### Room registry
+
+`galleryRooms.ts` separates room identity and visual themes from renderer components:
+
+```tsx
+export type GalleryRoomId = "main" | "studio";
+
+export const GALLERY_ROOMS = {
+  main: {
+    title: "Room I · Imagination Gallery",
+    nextRoom: "studio",
+    skyColor: "#d5e7f2",
+    sunlight: 3.2,
+    hasVending: true,
+  },
+  studio: {
+    title: "Room II · Quiet Gallery",
+    nextRoom: "main",
+    wallColor: "#b9c9c0",
+    sunlight: 2.2,
+    hasVending: false,
+  },
+} satisfies Record<GalleryRoomId, RoomDefinition>;
+```
+
+`satisfies` verifies every configuration while preserving literal types. `nextRoom` can only reference a valid `GalleryRoomId`, so TypeScript catches destination typos before the browser runs.
+
+### Portal as an interactive object
+
+`RoomPortal.tsx` places a thin `boxGeometry` over the opening in the right wall. A transparent material can still receive raycasts. On hover, a low opacity and `Edges` reveal the boundary. The portal also supplies a Drei `<Html>` button so keyboard users can activate it with Tab and Enter.
+
+```tsx
+<mesh
+  position={[4.87, 1.75, -7]}
+  rotation={[0, -Math.PI / 2, 0]}
+  onClick={() => onEnter()}
+  onPointerEnter={() => setHovered(true)}
+>
+  <boxGeometry args={[1.8, 3.4, 0.025]} />
+  <meshBasicMaterial transparent opacity={hovered ? 0.16 : 0.025} />
+  {hovered && <Edges color="#d8b77a" />}
+</mesh>
+```
+
+The hitbox follows the passage plane rather than covering the whole wall. A `disabled` flag removes interaction during transitions so a single navigation cannot be started twice.
+
+### Transition state machine
+
+Navigation does not rely on a guessed timeout. The camera timeline's `onArrive` callback is the signal that the approach has finished:
+
+```mermaid
+flowchart LR
+  Idle[Active room] -->|click passage| Approach[approaching]
+  Approach -->|camera onArrive| Cover[covering]
+  Cover -->|overlay opaque| Swap[change roomId]
+  Swap -->|camera reset| Reveal[revealing]
+  Reveal -->|fade complete| Idle
+```
+
+Responsibilities are sequenced as follows:
+
+1. `handleEnterRoom()` points the camera at `PASSAGE_TARGET` and enters `approaching`.
+2. `CameraController` runs the 1.2-second tween and invokes `onArrive`.
+3. `GalleryCanvas` fades the black overlay in for 0.4 seconds during `covering`.
+4. Once fully covered, it changes `roomId`, resets selection and the panel, then enters `revealing`.
+5. `CameraController` uses `useLayoutEffect` to restore `HOME_POSITION` before the overlay fades out for 0.4 seconds.
+
+The scene receives `key={roomId}`. A new ID causes React to remount the room subtree, preventing local hover and form state from leaking into the next room. A ref-based `transitionLock` closes the window before React state updates, while `inert` disables DOM interaction across the viewport. `isolation: isolate` keeps the transition cover above all Drei HTML.
+
+This implementation swaps scene configurations; it does not render two physically connected buildings. Free movement, collision, reload persistence, and room-specific home cameras are not implemented yet. That constraint keeps this first version light and testable.
+
+### Adding a third room
+
+1. Add its ID to `GalleryRoomId` and its object to `GALLERY_ROOMS`.
+2. Make every `nextRoom` destination valid.
+3. Add the room's artwork selection in `GalleryScene.tsx`.
+4. If geometry or home cameras differ, move those choices into room configuration.
+5. Test rapid clicks, Back, both portal directions, painting focus, keyboard use, and mobile layout.
+
+## 22. File-by-file reference
 
 ### `app/page.tsx`
 
@@ -686,8 +787,21 @@ flowchart TD
 
 - Main client boundary.
 - Creates the WebGL Canvas and initial camera.
-- Owns selection and vending panel state.
-- Renders Back and attribution outside the canvas.
+- Owns selection, vending panel, `roomId`, and transition phase.
+- Sequences approach, fade, room swap, reset, and reveal.
+- Renders Back, the room label, transition cover, and attribution.
+
+### `galleryRooms.ts`
+
+- Defines `GalleryRoomId`, both room configurations, and `PASSAGE_TARGET`.
+- Stores titles, subtitles, destinations, colors, lighting, and vending availability.
+- Makes room additions data-driven and type-safe.
+
+### `RoomPortal.tsx`
+
+- Adds the transparent hitbox to the right-hand passage.
+- Shows a hover outline and an accessible HTML button.
+- Reports navigation intent without mutating room state itself.
 
 ### `galleryLayout.ts`
 
@@ -704,7 +818,7 @@ flowchart TD
 
 ### `GalleryScene.tsx`
 
-- Stores painting, vending target, and lighting data; calls `GalleryRoom` to construct the building.
+- Selects painting data, vending target, room theme, and lighting from the active room.
 - Composes all 3D objects.
 - Receives callbacks instead of owning selection.
 - Acts as the 3D composition root.
@@ -722,6 +836,7 @@ flowchart TD
 - Renders no geometry (`return null`).
 - Watches `selectedTarget` changes.
 - Animates camera position and look-at vector.
+- Calls `onArrive` and resets the camera when `roomId` changes.
 - Cleans up stale timelines.
 
 ### `VendingMachine.tsx`
@@ -732,7 +847,7 @@ flowchart TD
 - Adds an invisible hitbox without editing the GLB.
 - Renders a DOM form attached to a 3D point.
 
-## 22. Common problems and diagnosis
+## 23. Common problems and diagnosis
 
 ### Texture is black or missing
 
@@ -774,7 +889,15 @@ The common cause is z-fighting. Separate the image plane from its backing or bui
 - Stop stale processes and restart `yarn dev`.
 - Inspect the first compilation error in the terminal instead of only the browser reconnect message.
 
-## 23. Performance and production quality
+### A room transition stalls or runs twice
+
+- Ensure only the active camera timeline invokes `onArrive`.
+- Kill the GSAP timeline during cleanup.
+- Keep `transitionLock`; React state alone leaves a same-frame double-click window.
+- Let completion callbacks advance both `covering` and `revealing`.
+- Confirm `nextRoom` references an ID in `GALLERY_ROOMS`.
+
+## 24. Performance and production quality
 
 Already implemented:
 
@@ -782,6 +905,8 @@ Already implemented:
 - bounded DPR to control pixel cost;
 - texture and GLB preload;
 - GSAP timeline cleanup;
+- one Canvas for every room, with the old scene unmounted on room swap;
+- input locking and an inert viewport during transitions;
 - separate data and components;
 - reduced-motion support for CSS overlays;
 - type-safe tuples and focus-target contract.
@@ -797,7 +922,7 @@ Recommended next improvements:
 - provide a fallback when WebGL is unavailable;
 - audit every asset license.
 
-## 24. Adding a painting
+## 25. Adding a painting
 
 1. Put the image in `public/paintings`.
 2. Add an item to the `paintings` array.
@@ -822,7 +947,7 @@ Example:
 }
 ```
 
-## 25. Building individual vending buttons
+## 26. Building individual vending buttons
 
 To accept direct keypad input, replace the large hitbox with a grid of small hitboxes:
 
@@ -844,7 +969,7 @@ For higher precision:
 4. retrieve named nodes from `useGLTF`;
 5. attach handlers or hitboxes to the relevant nodes.
 
-## 26. Learning exercises
+## 27. Learning exercises
 
 1. Add skylight glazing without blocking the camera; test transparency and shadows.
 2. Add a sculpture GLB in the room center.
@@ -854,8 +979,9 @@ For higher precision:
 6. Create a two-stage camera path: approach, then frame.
 7. Add a loading screen with Drei `useProgress`.
 8. Move artwork metadata into JSON.
+9. Add Room III with its own theme, collection, and portal route.
 
-## 27. Short glossary
+## 28. Short glossary
 
 | Term | Meaning |
 |---|---|
@@ -876,8 +1002,10 @@ For higher precision:
 | World space | Final coordinates relative to the scene root |
 | Tween | Interpolation from a start value to a destination over time |
 | Invalidate | Requesting a new R3F frame in demand mode |
+| State machine | Explicit phases and the transitions allowed between them |
+| Inert | DOM state that disables focus and interaction for a subtree |
 
-## 28. Mental model summary
+## 29. Mental model summary
 
 Once the following flow is clear, you have the main foundation of the project. The next stage is not merely adding features; it is strengthening the data model, accessibility, asset pipeline, and interaction testing.
 
@@ -893,6 +1021,10 @@ The pointer is raycast against meshes and hitboxes.
 Selection is stored in GalleryCanvas.
         ↓
 CameraController tweens the camera with GSAP.
+        ↓
+Portal arrival triggers a fade and roomId swap.
+        ↓
+The new room scene mounts and the camera resets.
         ↓
 Drei Html attaches DOM UI to 3D points.
 ```

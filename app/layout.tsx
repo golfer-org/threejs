@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Ruang Imaji | Galeri 3D",
-  description: "Pengalaman galeri lukisan 3D interaktif.",
+  title: "Imagination Gallery | 3D Art Gallery",
+  description: "Explore an interactive 3D art gallery.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="id" className="h-full antialiased">
+    <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
