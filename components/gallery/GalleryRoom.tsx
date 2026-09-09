@@ -17,22 +17,22 @@ function RoomBox({ position, size, color = "#e4dccb", roughness = 0.86 }: RoomBo
 }
 
 /** Geometry inspired by the reference image; perspective follows the real camera. */
-export function GalleryRoom() {
+export function GalleryRoom({ wallColor, floorColor }: { wallColor?: string; floorColor?: string }) {
   const halfWidth = ROOM.width / 2;
   const halfDepth = ROOM.depth / 2;
   const roofWingWidth = (ROOM.width - ROOM.skylightWidth) / 2;
 
   return (
     <group name="Skylight gallery architecture">
-      <RoomBox position={[0, -0.1, 0]} size={[ROOM.width, 0.2, ROOM.depth]} color="#cbb89b" roughness={0.48} />
-      <RoomBox position={[0, ROOM.height / 2, -halfDepth]} size={[ROOM.width, ROOM.height, ROOM.wallThickness]} color="#e8e0d2" />
-      <RoomBox position={[-halfWidth, ROOM.height / 2, 0]} size={[ROOM.wallThickness, ROOM.height, ROOM.depth]} color="#e5decf" />
+      <RoomBox position={[0, -0.1, 0]} size={[ROOM.width, 0.2, ROOM.depth]} color={floorColor ?? "#cbb89b"} roughness={0.48} />
+      <RoomBox position={[0, ROOM.height / 2, -halfDepth]} size={[ROOM.width, ROOM.height, ROOM.wallThickness]} color={wallColor ?? "#e8e0d2"} />
+      <RoomBox position={[-halfWidth, ROOM.height / 2, 0]} size={[ROOM.wallThickness, ROOM.height, ROOM.depth]} color={wallColor ?? "#e5decf"} />
 
       {/* A real opening in the rear of the right wall, with a recessed alcove. */}
-      <RoomBox position={[halfWidth, ROOM.height / 2, 1]} size={[ROOM.wallThickness, ROOM.height, 14]} color="#e9e1d4" />
+      <RoomBox position={[halfWidth, ROOM.height / 2, 1]} size={[ROOM.wallThickness, ROOM.height, 14]} color={wallColor ?? "#e9e1d4"} />
       <RoomBox position={[halfWidth, 4.65, -7]} size={[ROOM.wallThickness, 2.3, 2]} />
       <RoomBox position={[6.4, 1.75, -7]} size={[0.2, 3.5, 2.2]} color="#d3ccbf" />
-      <RoomBox position={[5.7, -0.1, -7]} size={[1.4, 0.2, 2]} color="#cbb89b" roughness={0.48} />
+      <RoomBox position={[5.7, -0.1, -7]} size={[1.4, 0.2, 2]} color={floorColor ?? "#cbb89b"} roughness={0.48} />
       {[-8, -6].map((z) => (
         <RoomBox key={z} position={[5.7, 1.75, z]} size={[1.4, 3.5, 0.2]} />
       ))}

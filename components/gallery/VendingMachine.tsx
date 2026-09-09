@@ -100,7 +100,7 @@ export function VendingMachine({
     if (!normalizedCode) return;
 
     setCode(normalizedCode);
-    setMessage(`Kode ${normalizedCode} berhasil dipilih.`);
+    setMessage(`Code ${normalizedCode} selected successfully.`);
   };
 
   return (
@@ -125,7 +125,7 @@ export function VendingMachine({
         >
           <aside
             className="vending-popover"
-            aria-label="Informasi Soda Vending Machine"
+            aria-label="About the Soda Vending Machine"
           >
             Soda Vending Machine
           </aside>
@@ -173,18 +173,18 @@ export function VendingMachine({
               className="vending-panel__close"
               type="button"
               onClick={onClosePanel}
-              aria-label="Tutup panel vending machine"
+              aria-label="Close the vending machine panel"
             >
               ×
             </button>
 
             <p className="vending-panel__eyebrow">Soda machine</p>
-            <h2>Pilih minuman</h2>
+            <h2>Choose a drink</h2>
             <p className="vending-panel__description">
-              Masukkan kode yang tertera di bawah minuman, misalnya B03.
+              Enter the code shown below your drink, for example B03.
             </p>
 
-            <label htmlFor="vending-code">Kode minuman</label>
+            <label htmlFor="vending-code">Drink code</label>
             <input
               id="vending-code"
               name="vending-code"
