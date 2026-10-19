@@ -10,6 +10,44 @@ Changes in 1.2: two-room navigation was added through the right-hand passage. `G
 
 ---
 
+## 0. Version history
+
+Documentation versions represent architecture and user-experience milestones rather than every small edit. The current release remains 1.2; the table below shows how the project evolved from its initial foundation.
+
+| Version | Focus | Main changes |
+|---|---|---|
+| 1.0 | Interactive gallery foundation | Full-screen Canvas, rectangular room, three reusable paintings, selection and hover, GSAP camera movement, popovers, a vending-machine GLB, invisible keypad hitbox, and a 3D HTML form |
+| 1.1 | Skylight room reconstruction | Rebuilt the room as Three.js geometry inspired by the cream interior reference; added skylight structures, shared layout constants, daylight, and revised object and camera placement |
+| 1.2 | Multi-room architecture and UI consistency | Added two typed room configurations, a passage portal, transition state machine, fade and camera reset, guarded input, room theme/collection variants, and fully English application wording |
+
+### From 1.0 to 1.1
+
+Version 1.0 proved the complete core interaction: users could select three paintings on different walls, focus the camera roughly three meters from an object, return to the overview, and use the vending-machine hitbox and form. The room itself was still a simple rectangular gallery.
+
+Version 1.1 changed the visual architecture without discarding that interaction system:
+
+- moved room dimensions and the home camera into `galleryLayout.ts`;
+- isolated the building in `GalleryRoom.tsx`;
+- constructed the floor, walls, alcove, beams, grille, and skylight as real 3D meshes;
+- replaced the darker atmosphere with daylight from ambient, hemisphere, directional, and spot lights;
+- recalibrated paintings, the vending machine, focus targets, and popovers for the new room;
+- kept the environment as real geometry instead of placing the reference image on a flat plane or automatically converting it to GLB.
+
+### From 1.1 to 1.2
+
+Version 1.2 expands the experience from one room to two:
+
+- added `galleryRooms.ts` as a registry for IDs, titles, colors, light intensity, portal destinations, and vending availability;
+- added `RoomPortal.tsx` with an invisible hitbox, hover outline, and keyboard-accessible HTML button;
+- added `roomId` and the `idle`, `approaching`, `covering`, and `revealing` phases to `GalleryCanvas`;
+- sequenced the camera tween, fade to black, scene swap, camera reset, and reveal through GSAP callbacks;
+- prevented duplicate transitions with `transitionLock`, a `disabled` prop, and an `inert` viewport;
+- remounted the scene subtree with `key={roomId}` so local hover and form state reset;
+- created Room II with a different palette, lighting, and artwork arrangement while reusing available assets;
+- translated application metadata, labels, buttons, popovers, forms, and messages into English.
+
+Version 1.2 does not add free movement or two physically connected buildings. It swaps room configurations inside one Canvas only after the transition cover becomes fully opaque.
+
 ## 1. Learning goals
 
 This document explains the actual `interactive-gallery` project rather than an isolated demo. After reading it, you should understand:

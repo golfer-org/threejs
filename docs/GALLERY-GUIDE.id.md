@@ -10,6 +10,44 @@ Perubahan 1.2: ditambahkan navigasi dua ruangan melalui portal pada lorong kanan
 
 ---
 
+## 0. Riwayat versi
+
+Dokumentasi memakai versioning berdasarkan tonggak arsitektur dan pengalaman pengguna, bukan setiap perubahan kecil. Versi terbaru tetap 1.2; tabel berikut menunjukkan evolusi proyek sejak fondasi pertamanya.
+
+| Versi | Fokus | Perubahan utama |
+|---|---|---|
+| 1.0 | Fondasi galeri interaktif | Canvas layar penuh, ruangan persegi panjang, tiga lukisan reusable, selection dan hover, kamera GSAP, popover, model GLB vending machine, invisible keypad hitbox, serta form HTML 3D |
+| 1.1 | Rekonstruksi ruang skylight | Ruangan dibangun ulang sebagai geometri Three.js berdasarkan referensi interior krem; ditambahkan struktur skylight, konstanta layout bersama, pencahayaan siang, dan penyesuaian posisi objek serta kamera |
+| 1.2 | Multi-room dan konsistensi UI | Dua ruangan dengan registry bertipe, portal lorong, state machine transisi, fade dan reset kamera, penguncian input, variasi tema/koleksi, serta seluruh wording aplikasi dalam bahasa Inggris |
+
+### Dari 1.0 ke 1.1
+
+Versi 1.0 membuktikan seluruh interaksi inti: pengguna dapat memilih tiga lukisan pada dinding berbeda, memfokuskan kamera sekitar tiga meter dari objek, kembali ke overview, serta memakai hitbox dan form vending machine. Ruang pada tahap ini masih berupa galeri kotak sederhana.
+
+Versi 1.1 mengubah arsitektur visual tanpa membuang sistem interaksi tersebut:
+
+- memindahkan ukuran ruangan dan kamera home ke `galleryLayout.ts`;
+- memisahkan bangunan ke `GalleryRoom.tsx`;
+- membangun lantai, dinding, ceruk, balok, ventilasi, dan skylight sebagai mesh 3D;
+- mengganti suasana gelap dengan pencahayaan siang dari ambient, hemisphere, directional light, dan spotlight;
+- mengatur ulang posisi painting, vending machine, target fokus, dan popover agar cocok dengan ruang baru;
+- mempertahankan background sebagai geometri nyata, bukan menempelkan gambar referensi sebagai bidang datar atau mengubahnya otomatis menjadi GLB.
+
+### Dari 1.1 ke 1.2
+
+Versi 1.2 memperluas satu ruangan menjadi pengalaman dua ruangan:
+
+- menambahkan `galleryRooms.ts` sebagai registry ID, judul, warna, intensitas cahaya, tujuan portal, dan ketersediaan vending;
+- menambahkan `RoomPortal.tsx` dengan invisible hitbox, outline hover, dan tombol HTML yang dapat diakses keyboard;
+- menambahkan `roomId` serta fase `idle`, `approaching`, `covering`, dan `revealing` pada `GalleryCanvas`;
+- mengurutkan tween kamera, fade gelap, pergantian scene, reset kamera, dan fade pembuka melalui callback GSAP;
+- mencegah perpindahan ganda memakai `transitionLock`, prop `disabled`, dan viewport `inert`;
+- memasang ulang subtree scene dengan `key={roomId}` agar hover dan form lokal ter-reset;
+- membuat Ruang II dengan warna, cahaya, dan susunan artwork berbeda sambil memakai ulang asset yang tersedia;
+- mengganti metadata, label, tombol, popover, form, dan pesan aplikasi ke bahasa Inggris.
+
+Perubahan 1.2 tidak menambahkan gerak bebas atau dua bangunan yang tersambung secara fisik. Aplikasi menukar konfigurasi ruangan di dalam satu Canvas ketika overlay tertutup penuh.
+
 ## 1. Tujuan pembelajaran
 
 Dokumen ini membedah proyek `interactive-gallery` yang sedang berjalan, bukan contoh terpisah. Setelah membacanya, Anda diharapkan memahami:

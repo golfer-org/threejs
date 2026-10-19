@@ -13,6 +13,12 @@ Versi 1.2 menambahkan arsitektur dua ruangan secara lengkap: registry bertipe, p
 
 The shorter [multi-room note](MULTI-ROOM.md) is a bilingual implementation summary; both full guides now contain the canonical step-by-step explanation.
 
+Version history / Riwayat versi:
+
+- **1.0:** interactive foundation - room, paintings, selection, GSAP camera, popovers, vending GLB, keypad hitbox, and form.
+- **1.1:** skylight reconstruction - native Three.js architecture, shared layout, daylight, and recalibrated placement.
+- **1.2:** multi-room architecture - typed registry, portal, four-phase transition, camera reset, guarded input, and English UI wording.
+
 ## Rebuild / Ekspor ulang
 
 The Markdown guides are the source of truth. Update both language editions before exporting. PDF diagrams render Mermaid connections as labeled vector arrows; the Markdown retains the original Mermaid graph syntax.
